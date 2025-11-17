@@ -130,6 +130,10 @@
   </div>
 
   <script>
+    // ----------- Config -----------
+    const N8N_URL = "https://selectable-doomily-max.ngrok-free.dev/webhook-test/my-webhook";
+    // ------------------------------
+
     // Particles background
     const canvas = document.getElementById('particles');
     const ctx = canvas.getContext('2d');
@@ -156,8 +160,6 @@
     });
 
     // ---------- Remote n8n integration + fallback to local simulation ----------
-    const N8N_URL = "https://selectable-doomily-max.ngrok-free.dev/webhook-test/my-webhook";
-
     genBtn.addEventListener('click', async () => {
       if (!fileEl.files || !fileEl.files[0]) { alert('Please upload an image first.'); return; }
       const file = fileEl.files[0];
@@ -174,8 +176,25 @@
 
       // Try remote n8n endpoint
       try {
-        const resp = await fetch(N8N_URL, { method: 'POST', body: fd });
-        const json = await resp.json();
+        const resp = await fetch(N8N_URL, { method: 'POST', body: fd, mode: 'cors' });
+        // Check response status
+        if (!resp.ok) {
+          const text = await resp.text().catch(()=>'<no body>');
+          console.error('n8n returned error', resp.status, resp.statusText, text);
+          alert('Server error: ' + resp.status + ' — see console for details.');
+          hideProgress();
+          return;
+        }
+
+        // parse body safely
+        let json;
+        const ct = resp.headers.get('content-type') || '';
+        if (ct.includes('application/json')) {
+          json = await resp.json();
+        } else {
+          const txt = await resp.text();
+          try { json = JSON.parse(txt); } catch(e) { console.error('Non-JSON response from n8n:', txt); alert('Unexpected response from server — see console.'); hideProgress(); return; }
+        }
 
         if (json && Array.isArray(json.faces) && json.faces.length === 6) {
           latestFaces = json.faces.map(f => normalizeFaceUrl(f));
@@ -186,7 +205,7 @@
           burstConfetti();
           return;
         } else {
-          console.warn('Unexpected response from n8n', json);
+          console.warn('Unexpected response from n8n (not faces array):', json);
           throw new Error('Unexpected response from remote');
         }
       } catch (err) {
@@ -217,7 +236,7 @@
     });
 
     // image -> cube functions
-    function applyFacesToCube(arr){ ['front','back','right','left','top','bottom'].forEach((k,i)=>{document.getElementById('f-'+k).src = arr[i];}); }
+    function applyFacesToCube(arr){ ['front','back','right','left','top','bottom'].forEach((k,i)=>{ const el=document.getElementById('f-'+k); if(el) el.src = arr[i] || '/'; }); }
     function populateThumbs(arr){ thumbs.innerHTML = ''; arr.forEach((d,i)=>{ const im=document.createElement('img'); im.src=d; im.title=['Front','Back','Right','Left','Top','Bottom'][i]; im.addEventListener('click', ()=>{ focusFace(i); setActiveThumb(i); }); if(i===0) im.classList.add('active'); thumbs.appendChild(im); }); }
     function setActiveThumb(i){ Array.from(thumbs.children).forEach((t,idx)=> t.classList.toggle('active', idx===i)); }
 
