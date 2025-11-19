@@ -1,28 +1,35 @@
 <!doctype html>
 <html lang="en">
+<head><!doctype html>
+<html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Study Visualizer — Interactive 3D Cube</title>
   <style>
-    :root{--accent:#6ee7b7;--accent-2:#83c746;--bg:#0f1724;--card:#0b1220;--muted:#9aa4b2}
+    :root{--accent:#ff6b9d;--accent-2:#c44569;--accent-3:#feca57;--accent-4:#48dbfb;--accent-5:#ff9ff3;--bg:#1a0033;--card:#2d0066;--muted:#d4a5ff}
     *{box-sizing:border-box}
-    html,body{height:100%;margin:0;font-family:Inter,Arial,Helvetica,sans-serif;background:linear-gradient(180deg,#071025 0%, #082436 60%);color:#e6eef6}
+    html,body{height:100%;margin:0;font-family:Inter,Arial,Helvetica,sans-serif;background:linear-gradient(135deg,#667eea 0%, #764ba2 25%, #f093fb 50%, #4facfe 75%, #00f2fe 100%);background-size:400% 400%;animation:gradientShift 15s ease infinite;color:#fff}
+    @keyframes gradientShift{0%{background-position:0% 50%}50%{background-position:100% 50%}100%{background-position:0% 50%}}
     .wrap{max-width:1200px;margin:28px auto;padding:20px}
     header{display:flex;align-items:center;gap:18px}
-    .logo{width:56px;height:56px;border-radius:12px;background:linear-gradient(135deg,var(--accent),var(--accent-2));display:flex;align-items:center;justify-content:center;font-weight:700;color:#042;box-shadow:0 8px 30px rgba(0,0,0,0.6)}
-    h1{margin:0;font-size:26px}
-    p.lead{margin:4px 0 0;color:var(--muted)}
+    .logo{width:56px;height:56px;border-radius:16px;background:linear-gradient(135deg,#ff6b9d,#feca57,#48dbfb);display:flex;align-items:center;justify-content:center;font-weight:700;color:#fff;box-shadow:0 12px 40px rgba(255,107,157,0.6),0 0 60px rgba(254,202,87,0.4);animation:logoFloat 3s ease-in-out infinite}
+    h1{margin:0;font-size:26px;background:linear-gradient(135deg,#fff,#feca57,#ff6b9d);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;animation:titleShimmer 3s ease-in-out infinite}
+    @keyframes titleShimmer{0%,100%{filter:hue-rotate(0deg)}50%{filter:hue-rotate(20deg)}}
+    @keyframes logoFloat{0%,100%{transform:translateY(0px) rotate(0deg)}50%{transform:translateY(-10px) rotate(5deg)}}
+    p.lead{margin:4px 0 0;color:#fff;text-shadow:0 2px 4px rgba(0,0,0,0.3)}
     main{display:grid;grid-template-columns:1fr 420px;gap:20px;margin-top:18px}
-    .card{background:linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.02));border-radius:14px;padding:16px;box-shadow:0 8px 30px rgba(3,7,18,0.6);border:1px solid rgba(255,255,255,0.03)}
+    .card{background:linear-gradient(135deg, rgba(255,255,255,0.15), rgba(255,255,255,0.05));backdrop-filter:blur(20px);border-radius:20px;padding:16px;box-shadow:0 8px 32px rgba(31,38,135,0.37),0 0 80px rgba(255,107,157,0.2);border:1px solid rgba(255,255,255,0.18)}
     .hero{display:flex;gap:16px;align-items:center}
     .hero .left{flex:1}
     .hero .controls{display:flex;gap:8px;margin-top:12px}
-    .btn{background:var(--accent);color:#042;padding:8px 12px;border-radius:10px;border:0;cursor:pointer;font-weight:600}
-    .btn-ghost{background:transparent;border:1px solid rgba(255,255,255,0.06);color:#eaf6ff;padding:8px 12px;border-radius:10px;cursor:pointer}
+    .btn{background:linear-gradient(135deg,#ff6b9d,#feca57);color:#fff;padding:10px 20px;border-radius:12px;border:0;cursor:pointer;font-weight:700;box-shadow:0 4px 15px rgba(255,107,157,0.4);transition:all 0.3s ease;text-shadow:0 2px 4px rgba(0,0,0,0.2)}
+    .btn:hover{transform:translateY(-2px);box-shadow:0 8px 25px rgba(255,107,157,0.6)}
+    .btn-ghost{background:rgba(255,255,255,0.1);backdrop-filter:blur(10px);border:2px solid rgba(255,255,255,0.3);color:#fff;padding:8px 16px;border-radius:12px;cursor:pointer;transition:all 0.3s ease;font-weight:600}
+    .btn-ghost:hover{background:rgba(255,255,255,0.2);border-color:rgba(255,255,255,0.5);transform:translateY(-2px)}
     .stage{width:100%;height:420px;display:flex;align-items:center;justify-content:center;perspective:1600px;position:relative}
     .scene{width:360px;height:360px;position:relative;transform-style:preserve-3d;transition:transform 350ms cubic-bezier(.2,.9,.3,1)}
-    .cube-face{position:absolute;width:360px;height:360px;left:0;top:0;border-radius:12px;overflow:hidden;backface-visibility:hidden;display:flex;align-items:center;justify-content:center;background:#fff}
+    .cube-face{position:absolute;width:360px;height:360px;left:0;top:0;border-radius:16px;overflow:hidden;backface-visibility:hidden;display:flex;align-items:center;justify-content:center;background:#fff;box-shadow:0 0 40px rgba(255,107,157,0.6),inset 0 0 20px rgba(254,202,87,0.3)}
     .cube-face img{width:100%;height:100%;object-fit:cover;display:block}
     .face-front{transform:translateZ(180px)}
     .face-back{transform:rotateY(180deg) translateZ(180px)}
@@ -32,15 +39,21 @@
     .face-bottom{transform:rotateX(-90deg) translateZ(180px)}
     .mini-controls{display:flex;gap:8px;align-items:center;margin-top:12px}
     .thumbs{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
-    .thumbs img{width:72px;height:72px;object-fit:cover;border-radius:8px;border:2px solid transparent;cursor:pointer}
-    .thumbs img.active{outline:3px solid rgba(110,231,183,0.12);transform:scale(1.02)}
+    .thumbs img{width:72px;height:72px;object-fit:cover;border-radius:12px;border:3px solid rgba(255,255,255,0.3);cursor:pointer;transition:all 0.3s ease;box-shadow:0 4px 15px rgba(0,0,0,0.2)}
+    .thumbs img:hover{transform:scale(1.1);border-color:rgba(255,107,157,0.8)}
+    .thumbs img.active{outline:4px solid #feca57;border-color:#ff6b9d;transform:scale(1.08);box-shadow:0 8px 25px rgba(255,107,157,0.6)}
     .right-col{position:sticky;top:28px}
-    .status{color:var(--muted);font-size:13px;margin-top:8px}
+    .status{color:#fff;font-size:13px;margin-top:8px;text-shadow:0 2px 4px rgba(0,0,0,0.3)}
     #particles{position:fixed;left:0;top:0;right:0;bottom:0;pointer-events:none;z-index:0}
-    .hint{font-size:13px;color:var(--muted)}
+    .hint{font-size:13px;color:#fff;text-shadow:0 2px 4px rgba(0,0,0,0.3)}
     @media (max-width:980px){main{grid-template-columns:1fr} .face-front,.cube-face{width:300px;height:300px} .scene{width:300px;height:300px}}
     .pulse{animation:pulse 1.8s infinite}
     @keyframes pulse{0%{transform:scale(1)}50%{transform:scale(1.02)}100%{transform:scale(1)}}
+    input[type="file"], input[type="text"]{background:rgba(255,255,255,0.15);backdrop-filter:blur(10px);border:2px solid rgba(255,255,255,0.3);color:#fff;border-radius:12px;padding:10px;transition:all 0.3s ease}
+    input[type="file"]:hover, input[type="text"]:hover{border-color:rgba(255,255,255,0.5);background:rgba(255,255,255,0.2)}
+    input[type="text"]::placeholder{color:rgba(255,255,255,0.6)}
+    h2,h3,h4{color:#fff;text-shadow:0 2px 8px rgba(0,0,0,0.3)}
+    code{background:rgba(255,255,255,0.2);padding:2px 6px;border-radius:4px;color:#feca57}
   </style>
 </head>
 <body>
@@ -62,8 +75,8 @@
             <p class="hint">Upload an image and type a short description (e.g., "benzene molecule top view"). This demo will first try the remote n8n service, then fallback locally if remote fails.</p>
 
             <div style="display:flex;gap:8px;margin-top:12px;align-items:center">
-              <input id="file" type="file" accept="image/*" style="padding:8px;background:transparent;color:inherit;border-radius:8px;border:1px solid rgba(255,255,255,0.04)" />
-              <input id="desc" type="text" placeholder="Enter description or topic" style="flex:1;padding:10px;border-radius:8px;border:1px solid rgba(255,255,255,0.04);background:transparent;color:inherit" />
+              <input id="file" type="file" accept="image/*" />
+              <input id="desc" type="text" placeholder="Enter description or topic" style="flex:1" />
               <button class="btn" id="gen">Generate</button>
             </div>
 
@@ -100,7 +113,7 @@
 
         <div class="card" style="margin-top:14px">
           <h3 style="margin:0">Interactive tips</h3>
-          <ul style="color:var(--muted);padding-left:18px;margin-top:8px">
+          <ul style="color:#fff;padding-left:18px;margin-top:8px;text-shadow:0 2px 4px rgba(0,0,0,0.3)">
             <li>Drag the cube to rotate it manually.</li>
             <li>Click thumbnails to highlight and focus that face.</li>
             <li>Press <code>Space</code> to toggle autoplay spin.</li>
@@ -112,7 +125,7 @@
       <aside class="right-col">
         <div class="card">
           <h3 style="margin:0">OUR SERVICES</h3>
-          <p style="color:var(--muted);margin-top:8px">Gives the 3D realistic image of all sides by using ai agent and help students to better visualization of concepts. Input that website take is image and discription of image or topic. Six image that ai agent is going to give is added on output in website like a cube all images are in the form of cube and user can rotate it easily.</p>
+          <p style="color:#fff;margin-top:8px;text-shadow:0 2px 4px rgba(0,0,0,0.3)">Gives the 3D realistic image of all sides by using ai agent and help students to better visualization of concepts. Input that website take is image and discription of image or topic. Six image that ai agent is going to give is added on output in website like a cube all images are in the form of cube and user can rotate it easily.</p>
 
           <div style="margin-top:12px">
             <strong>Export</strong>
@@ -131,19 +144,18 @@
 
   <script>
     // ----------- Config -----------
-    // Replace this with your real webhook URL. Keep it CORS-enabled.
-    // Example: const N8N_URL = "https://your-ngrok-or-domain/webhook/your-webhook";
     const N8N_URL = "https://selectable-doomily-max.ngrok-free.dev/webhook-test/my-webhook";
-    // -------------------------------
+    // ------------------------------
 
-    // Particles background (unchanged)
+    // Particles background
     const canvas = document.getElementById('particles');
     const ctx = canvas.getContext('2d');
     let W, H, parts=[];
     function resize(){W=canvas.width=innerWidth;H=canvas.height=innerHeight}
     addEventListener('resize',resize);resize();
-    for(let i=0;i<80;i++) parts.push({x:Math.random()*W,y:Math.random()*H,r:Math.random()*1.6+0.6,vx:(Math.random()-0.5)*0.2,vy:(Math.random()-0.5)*0.2});
-    function tick(){ctx.clearRect(0,0,W,H);for(const p of parts){p.x+=p.vx;p.y+=p.vy;if(p.x<0)p.x=W; if(p.x>W)p.x=0; if(p.y<0)p.y=H; if(p.y>H)p.y=0; ctx.beginPath(); ctx.fillStyle='rgba(110,231,183,0.06)'; ctx.arc(p.x,p.y,p.r,0,Math.PI*2); ctx.fill();} requestAnimationFrame(tick);} tick();
+    const colors=['rgba(255,107,157,0.3)','rgba(254,202,87,0.3)','rgba(72,219,251,0.3)','rgba(255,159,243,0.3)'];
+    for(let i=0;i<120;i++) parts.push({x:Math.random()*W,y:Math.random()*H,r:Math.random()*2.5+0.8,vx:(Math.random()-0.5)*0.3,vy:(Math.random()-0.5)*0.3,c:colors[Math.floor(Math.random()*colors.length)]});
+    function tick(){ctx.clearRect(0,0,W,H);for(const p of parts){p.x+=p.vx;p.y+=p.vy;if(p.x<0)p.x=W; if(p.x>W)p.x=0; if(p.y<0)p.y=H; if(p.y>H)p.y=0; ctx.beginPath(); ctx.fillStyle=p.c; ctx.shadowBlur=15; ctx.shadowColor=p.c; ctx.arc(p.x,p.y,p.r,0,Math.PI*2); ctx.fill(); ctx.shadowBlur=0;} requestAnimationFrame(tick);} tick();
 
     // Elements
     const fileEl = document.getElementById('file');
@@ -171,95 +183,48 @@
       playPop();
       showProgress();
 
+      // Prepare form data: send original file and description
       const fd = new FormData();
       fd.append('image', file);
       fd.append('description', desc);
 
       // Try remote n8n endpoint
       try {
-        // 30s timeout wrapper
-        const controller = new AbortController();
-        const timeout = setTimeout(()=>controller.abort(), 30000);
-
-        const resp = await fetch(N8N_URL, { method: 'POST', body: fd, mode: 'cors', signal: controller.signal });
-        clearTimeout(timeout);
-
+        const resp = await fetch(N8N_URL, { method: 'POST', body: fd, mode: 'cors' });
+        // Check response status
         if (!resp.ok) {
           const text = await resp.text().catch(()=>'<no body>');
           console.error('n8n returned error', resp.status, resp.statusText, text);
-          throw new Error('n8n server error: ' + resp.status);
+          alert('Server error: ' + resp.status + ' — see console for details.');
+          hideProgress();
+          return;
         }
 
-        // try parse JSON
-        let json = null;
+        // parse body safely
+        let json;
         const ct = resp.headers.get('content-type') || '';
         if (ct.includes('application/json')) {
           json = await resp.json();
         } else {
           const txt = await resp.text();
-          try { json = JSON.parse(txt); } catch(e) {
-            console.warn('Response not JSON:', txt);
-            throw new Error('Response from server not valid JSON');
-          }
+          try { json = JSON.parse(txt); } catch(e) { console.error('Non-JSON response from n8n:', txt); alert('Unexpected response from server — see console.'); hideProgress(); return; }
         }
 
-        // Accept multiple response shapes:
-        // 1) { faces: [url, ...] }     (array of 6)
-        // 2) { images: { front: url, back: url, ... } }
-        // 3) { faces: [ {url:..., name:...}, ... ] }
-        // 4) any combination where values may be data URLs or Drive links
-
-        let faces = null;
-
-        if (Array.isArray(json.faces)) {
-          // array form: extract url strings (if objects, try .url or .src)
-          faces = json.faces.map(f => (typeof f === 'string') ? f : (f && (f.url || f.src || f.data)) ? (f.url||f.src||f.data) : '');
-        } else if (json.images && typeof json.images === 'object') {
-          // map form: produce in order front, back, right, left, top, bottom
-          const keys = ['front','back','right','left','top','bottom'];
-          faces = keys.map(k => json.images[k] || json.images[k.toUpperCase()] || '');
-        } else if (json.data && Array.isArray(json.data)) {
-          faces = json.data.map(String);
-        }
-
-        // if faces is present and length 6 -> normalize and use them
-        if (faces && faces.length === 6) {
-          latestFaces = faces.map(normalizeFaceUrl);
+        if (json && Array.isArray(json.faces) && json.faces.length === 6) {
+          latestFaces = json.faces.map(f => normalizeFaceUrl(f));
           applyFacesToCube(latestFaces);
           populateThumbs(latestFaces);
           status.innerHTML = `Generated 6 views for: <strong>${escapeHtml(desc)}</strong> (remote)`;
           hideProgress();
           burstConfetti();
           return;
+        } else {
+          console.warn('Unexpected response from n8n (not faces array):', json);
+          throw new Error('Unexpected response from remote');
         }
-
-        // else: maybe server returned a single object with file ids or drive links
-        // fallback: collect any string values from the entire JSON until we have 6 images
-        const collected = [];
-        (function collectStrings(o) {
-          if (!o || collected.length >= 6) return;
-          if (typeof o === 'string' && o.length>5 && (o.startsWith('http') || o.startsWith('data:'))) collected.push(o);
-          else if (Array.isArray(o)) o.forEach(collectStrings);
-          else if (typeof o === 'object') Object.values(o).forEach(collectStrings);
-        })(json);
-
-        if (collected.length >= 6) {
-          latestFaces = collected.slice(0,6).map(normalizeFaceUrl);
-          applyFacesToCube(latestFaces);
-          populateThumbs(latestFaces);
-          status.innerHTML = `Generated 6 views for: <strong>${escapeHtml(desc)}</strong> (remote - auto-collected)`;
-          hideProgress();
-          burstConfetti();
-          return;
-        }
-
-        // nothing usable returned
-        console.warn('Unexpected response from n8n:', json);
-        throw new Error('Unexpected response from remote');
-
       } catch (err) {
         console.warn('Remote processing failed — falling back to local simulation.', err);
-        // fallback to local simulation (same as your original ops)
+        // fallback to local simulation
         try {
           const ops = [
             {flip:false,rot:0,gray:false,scale:1},
@@ -291,7 +256,7 @@
 
     // progress overlay
     let progEl=null;
-    function showProgress(){ if(progEl) return; progEl=document.createElement('div'); progEl.style.position='fixed'; progEl.style.left='50%'; progEl.style.top='12%'; progEl.style.transform='translateX(-50%)'; progEl.style.padding='10px 14px'; progEl.style.background='rgba(3,6,12,0.7)'; progEl.style.border='1px solid rgba(255,255,255,0.04)'; progEl.style.borderRadius='10px'; progEl.style.color='#cfeee0'; progEl.innerText='Processing — thinking like an AI agent...'; document.body.appendChild(progEl); }
+    function showProgress(){ if(progEl) return; progEl=document.createElement('div'); progEl.style.position='fixed'; progEl.style.left='50%'; progEl.style.top='12%'; progEl.style.transform='translateX(-50%)'; progEl.style.padding='14px 20px'; progEl.style.background='linear-gradient(135deg,rgba(255,107,157,0.9),rgba(254,202,87,0.9))'; progEl.style.border='2px solid rgba(255,255,255,0.3)'; progEl.style.borderRadius='16px'; progEl.style.color='#fff'; progEl.style.fontWeight='700'; progEl.style.boxShadow='0 8px 32px rgba(0,0,0,0.4)'; progEl.style.backdropFilter='blur(10px)'; progEl.innerText='Processing — thinking like an AI agent...'; document.body.appendChild(progEl); }
     function hideProgress(){ if(!progEl) return; progEl.remove(); progEl=null; }
 
     // focus cube
@@ -310,7 +275,7 @@
     // audio and confetti
     const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     function playPop(){ try{ const o=audioCtx.createOscillator(); const g=audioCtx.createGain(); o.type='sine'; o.frequency.value=600; g.gain.value=0.02; o.connect(g); g.connect(audioCtx.destination); o.start(); setTimeout(()=>{ o.frequency.value=350; },80); setTimeout(()=>{ o.stop(); },180);}catch(e){} }
-    function burstConfetti(){ for(let i=0;i<24;i++){ const el=document.createElement('div'); el.style.position='fixed'; el.style.left=(50+Math.random()*20-10)+'%'; el.style.top='20%'; el.style.width='8px'; el.style.height='12px'; el.style.background=['#6ee7b7','#83c746','#ffd166','#ff7b7b'][Math.floor(Math.random()*4)]; el.style.opacity=0.95; el.style.transform='translateY(0) rotate('+Math.random()*180+'deg)'; el.style.borderRadius='2px'; el.style.zIndex=9999; document.body.appendChild(el); const dx=(Math.random()-0.5)*200; const dy=400+Math.random()*200; el.animate([{transform:`translate(${dx}px,${dy}px) rotate(${Math.random()*360}deg)`,opacity:0.95},{transform:`translate(${dx}px,${dy+60}px) rotate(${Math.random()*720}deg)`,opacity:0}],{duration:1600+Math.random()*400,easing:'cubic-bezier(.2,.9,.2,1)'}).onfinish = ()=>el.remove(); } }
+    function burstConfetti(){ for(let i=0;i<36;i++){ const el=document.createElement('div'); el.style.position='fixed'; el.style.left=(50+Math.random()*20-10)+'%'; el.style.top='20%'; el.style.width='10px'; el.style.height='14px'; el.style.background=['#ff6b9d','#feca57','#48dbfb','#ff9ff3','#fff'][Math.floor(Math.random()*5)]; el.style.opacity=0.95; el.style.transform='translateY(0) rotate('+Math.random()*180+'deg)'; el.style.borderRadius='3px'; el.style.zIndex=9999; el.style.boxShadow='0 0 10px currentColor'; document.body.appendChild(el); const dx=(Math.random()-0.5)*250; const dy=500+Math.random()*250; el.animate([{transform:`translate(${dx}px,${dy}px) rotate(${Math.random()*360}deg)`,opacity:0.95},{transform:`translate(${dx}px,${dy+80}px) rotate(${Math.random()*720}deg)`,opacity:0}],{duration:1800+Math.random()*600,easing:'cubic-bezier(.2,.9,.2,1)'}).onfinish = ()=>el.remove(); } }
 
     // keyboard toggle for autoplay
     document.addEventListener('keydown', e=>{ if(e.code==='Space'){ toggleAuto(); e.preventDefault(); } });
@@ -332,31 +297,7 @@
       latestFaces.forEach((d,i)=>{ const a=document.createElement('a'); a.href=d; a.download='face-'+i+'.jpg'; document.body.appendChild(a); a.click(); a.remove(); });
     });
 
-    function normalizeFaceUrl(face){
-      if(!face) return '';
-      const s = String(face).trim();
-      // if google drive share link -> convert to embedable 'uc?export=view&id='
-      if (s.includes('drive.google.com')) return convertGoogleDriveLink(s);
-      // if looks like direct link or data url -> return as-is
-      if (s.startsWith('http') || s.startsWith('data:')) return s;
-      // if it's a plain file id (common if n8n returns id only) -> build drive uc url
-      if (/^[a-zA-Z0-9_-]{10,}$/.test(s)) return `https://drive.google.com/uc?export=view&id=${s}`;
-      return s;
-    }
-
-    function convertGoogleDriveLink(url){
-      // handle multiple drive link forms
-      try {
-        // common share link: https://drive.google.com/file/d/FILE_ID/view?usp=sharing
-        let m = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
-        if (m && m[1]) return `https://drive.google.com/uc?export=view&id=${m[1]}`;
-        // alternate: https://drive.google.com/open?id=FILE_ID or webContentLink with id param
-        m = url.match(/[?&]id=([a-zA-Z0-9_-]+)/);
-        if (m && m[1]) return `https://drive.google.com/uc?export=view&id=${m[1]}`;
-        // if it's already a webContentLink with &export=download, return as-is
-        return url;
-      } catch (e) { return url; }
-    }
+    function normalizeFaceUrl(face){ if(!face) return ''; return String(face); }
 
     // share copy text
     document.getElementById('shareBtn').addEventListener('click', ()=>{ const text = `Study Visualizer — generated views for: ${descEl.value||'untitled'}`; navigator.clipboard.writeText(text).then(()=>{ alert('Share text copied to clipboard'); }); });
