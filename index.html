@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Study Visualizer — Interactive 3D Cube</title>
   <style>
+    /* (kept your rich CSS) */
     :root{--accent:#ff6b9d;--accent-2:#c44569;--accent-3:#feca57;--accent-4:#48dbfb;--accent-5:#ff9ff3;--bg:#1a0033;--card:#2d0066;--muted:#d4a5ff}
     *{box-sizing:border-box}
     html,body{height:100%;margin:0;font-family:Inter,Arial,Helvetica,sans-serif;background:linear-gradient(135deg,#667eea 0%, #764ba2 25%, #f093fb 50%, #4facfe 75%, #00f2fe 100%);background-size:400% 400%;animation:gradientShift 15s ease infinite;color:#fff}
@@ -143,6 +144,8 @@
   <script>
     // ----------- Config -----------
     const N8N_URL = "https://selectable-doomily-max.ngrok-free.dev/webhook-test/my-webhook";
+    // Local uploaded workflow path (provided as requested). Your environment/tooling can transform this into a served URL if needed.
+    const UPLOADED_WORKFLOW_PATH = '/mnt/data/final work flow (1).json';
     // ------------------------------
 
     // Particles background
@@ -162,7 +165,8 @@
     const descEl = document.getElementById('desc');
     const thumbs = document.getElementById('thumbs');
 
-    let sourceImage = null; let latestFaces = [];
+    let sourceImage = null;
+    let latestFaces = []; // stores object URLs; we'll revoke them when replaced
 
     fileEl.addEventListener('change', async (e)=>{
       const f = e.target.files && e.target.files[0];
@@ -170,6 +174,14 @@
       sourceImage = await loadImageFromFile(f);
       status.textContent = 'Image loaded. Enter a description and click Generate.';
     });
+
+    // helper to revoke object URLs
+    function clearLatestFaces(){
+      latestFaces.forEach(u => {
+        try{ URL.revokeObjectURL(u); } catch(e){}
+      });
+      latestFaces = [];
+    }
 
     // ---------- Remote n8n integration + fallback to local simulation ----------
     genBtn.addEventListener('click', async () => {
@@ -181,48 +193,210 @@
       playPop();
       showProgress();
 
-      // Prepare form data: send original file and description
       const fd = new FormData();
       fd.append('image', file);
       fd.append('description', desc);
 
-      // Try remote n8n endpoint
       try {
         const resp = await fetch(N8N_URL, { method: 'POST', body: fd, mode: 'cors' });
-        // Check response status
+
         if (!resp.ok) {
-          const text = await resp.text().catch(()=>'<no body>');
-          console.error('n8n returned error', resp.status, resp.statusText, text);
+          const txt = await resp.text().catch(()=>'<no body>');
+          console.error('n8n returned error', resp.status, resp.statusText, txt);
           alert('Server error: ' + resp.status + ' — see console for details.');
           hideProgress();
           return;
         }
 
-        // parse body safely
-        let json;
-        const ct = resp.headers.get('content-type') || '';
+        const ct = (resp.headers.get('content-type') || '').toLowerCase();
+
+        // ========== 1) JSON response ==========
         if (ct.includes('application/json')) {
-          json = await resp.json();
-        } else {
-          const txt = await resp.text();
-          try { json = JSON.parse(txt); } catch(e) { console.error('Non-JSON response from n8n:', txt); alert('Unexpected response from server — see console.'); hideProgress(); return; }
+          const json = await resp.json();
+
+          // Accept many JSON shapes:
+          // - { faces: [urlOrDataUrl, ...] }
+          // - { images: { front: url, ... } }
+          // - { data: [ ... ] } or nested structures containing strings
+          if (Array.isArray(json.faces) && json.faces.length === 6) {
+            clearLatestFaces();
+            latestFaces = json.faces.map(f => normalizeFaceUrl(f));
+            applyFacesToCube(latestFaces);
+            populateThumbs(latestFaces);
+            status.innerHTML = `Generated 6 views for: <strong>${escapeHtml(desc)}</strong> (remote JSON)`;
+            hideProgress(); burstConfetti(); return;
+          }
+
+          if (json.images && typeof json.images === 'object') {
+            const keys = ['front','back','right','left','top','bottom'];
+            const arr = keys.map(k => json.images[k] || json.images[k.toUpperCase()] || '');
+            if (arr.filter(Boolean).length === 6) {
+              clearLatestFaces();
+              latestFaces = arr.map(normalizeFaceUrl);
+              applyFacesToCube(latestFaces);
+              populateThumbs(latestFaces);
+              status.innerHTML = `Generated 6 views for: <strong>${escapeHtml(desc)}</strong> (remote JSON images)`;
+              hideProgress(); burstConfetti(); return;
+            }
+          }
+
+          // fallback: collect any data URLs / http urls from JSON until we have 6
+          const collected = [];
+          (function collect(o){
+            if (!o || collected.length >= 6) return;
+            if (typeof o === 'string' && (o.startsWith('http') || o.startsWith('data:'))) collected.push(o);
+            else if (Array.isArray(o)) o.forEach(collect);
+            else if (typeof o === 'object') Object.values(o).forEach(collect);
+          })(json);
+
+          if (collected.length >= 6) {
+            clearLatestFaces();
+            latestFaces = collected.slice(0,6).map(normalizeFaceUrl);
+            applyFacesToCube(latestFaces);
+            populateThumbs(latestFaces);
+            status.innerHTML = `Generated 6 views for: <strong>${escapeHtml(desc)}</strong> (remote JSON - auto-collected)`;
+            hideProgress(); burstConfetti(); return;
+          }
+
+          // else fallthrough to error
+          throw new Error('JSON returned but no usable faces found');
         }
 
-        if (json && Array.isArray(json.faces) && json.faces.length === 6) {
-          latestFaces = json.faces.map(f => normalizeFaceUrl(f));
+        // ========== 2) MULTIPART BINARY (expected: face0..face5) ==========
+        if (ct.includes('multipart/')) {
+          // Extract boundary token
+          const bMatch = ct.match(/boundary=(?:"([^"]+)"|([^;]+))/i);
+          const boundary = bMatch ? (bMatch[1] || bMatch[2]) : null;
+          if (!boundary) throw new Error('Multipart response but no boundary found');
+
+          const buffer = await resp.arrayBuffer();
+          // convert to string for boundary splitting (assumes server used base64 for binary parts,
+          // otherwise raw binary to text can corrupt bytes; most server multipart responses encode binary parts as base64)
+          const text = new TextDecoder('utf-8').decode(buffer);
+          const parts = text.split(new RegExp(`--${boundary}`)).map(s => s.trim()).filter(s => s && s !== '--');
+
+          const faces = [];
+          for (const part of parts) {
+            // header / body split
+            const idx = part.indexOf('\r\n\r\n');
+            if (idx < 0) continue;
+            const headersRaw = part.slice(0, idx).trim();
+            let bodyRaw = part.slice(idx + 4).trim();
+
+            // Try to extract name from Content-Disposition
+            const nameMatch = headersRaw.match(/content-disposition:[^\r\n]*name="?([^"\r\n;]+)"?/i);
+            const partName = nameMatch ? nameMatch[1] : null;
+
+            // Determine mime from Content-Type header if present
+            const mimeMatch = headersRaw.match(/content-type:\s*([^\r\n;]+)/i);
+            const mime = mimeMatch ? mimeMatch[1].trim() : 'image/jpeg';
+
+            // If the part indicates base64 encoding, decode it
+            const isBase64 = /content-transfer-encoding:\s*base64/i.test(headersRaw);
+
+            if (isBase64) {
+              // Clean body (remove possible trailing boundary markers)
+              bodyRaw = bodyRaw.replace(/--$/, '').trim();
+              // In case the part has extra line breaks, join them
+              const base64 = bodyRaw.replace(/\r\n/g, '').replace(/\n/g, '');
+              try {
+                const binary = atob(base64);
+                const len = binary.length;
+                const bytes = new Uint8Array(len);
+                for (let i=0;i<len;i++) bytes[i] = binary.charCodeAt(i);
+                const blob = new Blob([bytes], { type: mime });
+                const url = URL.createObjectURL(blob);
+                // Only accept parts named face0..face5 (or accept any and take first six in order)
+                if (partName && /^face[0-5]$/.test(partName.toLowerCase())) {
+                  faces[parseInt(partName.slice(4),10)] = url;
+                } else {
+                  faces.push(url);
+                }
+              } catch(e) {
+                console.warn('Failed to decode base64 multipart part', e);
+              }
+            } else {
+              // Not base64 — this is tricky because decoding raw binary to text corrupts bytes.
+              // Best-effort: check if bodyRaw is a data-url or a URL string
+              if (bodyRaw.startsWith('data:')) {
+                faces.push(bodyRaw);
+              } else if (bodyRaw.startsWith('http')) {
+                faces.push(bodyRaw);
+              } else {
+                // cannot reliably reconstruct raw binary from text conversion — log and skip
+                console.warn('Multipart part appears non-base64 and not a data/http url — skipping', headersRaw);
+              }
+            }
+          }
+
+          // Ensure faces array length = 6 (fill missing with null)
+          const final = [];
+          for (let i=0;i<6;i++) final[i] = (faces[i]||faces.shift()||null);
+
+          if (final.filter(Boolean).length === 6) {
+            clearLatestFaces();
+            latestFaces = final.map(normalizeFaceUrl);
+            applyFacesToCube(latestFaces);
+            populateThumbs(latestFaces);
+            status.innerHTML = `Generated 6 binary faces from n8n (multipart)`;
+            hideProgress(); burstConfetti(); return;
+          } else {
+            console.warn('Multipart parsing produced', final);
+            // If not full set, fallthrough to other cases / error out
+          }
+        }
+
+        // ========== 3) SINGLE IMAGE BINARY (server returned one image blob) ==========
+        if (ct.startsWith('image/')) {
+          // server returned single image. We will NOT duplicate automatically.
+          // Instead, create object url and show a warning so user knows server should return 6 parts.
+          const blob = await resp.blob();
+          const url = URL.createObjectURL(blob);
+          clearLatestFaces();
+          latestFaces = [url];
           applyFacesToCube(latestFaces);
           populateThumbs(latestFaces);
-          status.innerHTML = `Generated 6 views for: <strong>${escapeHtml(desc)}</strong> (remote)`;
+          status.innerHTML = `Server returned ONE binary image — please return six images (face0..face5) for full cube.`;
           hideProgress();
-          burstConfetti();
           return;
-        } else {
-          console.warn('Unexpected response from n8n (not faces array):', json);
-          throw new Error('Unexpected response from remote');
         }
+
+        // ========== 4) fallback: entire body text contains JSON-like or URLs ==========
+        {
+          const txt = await resp.text().catch(()=>null);
+          if (txt) {
+            try {
+              const maybe = JSON.parse(txt);
+              // recursive handling by reusing the JSON branch
+              if (maybe) {
+                // reuse JSON handling via temporary function call (simple)
+                const collected = [];
+                (function collect(o){
+                  if (!o || collected.length >= 6) return;
+                  if (typeof o === 'string' && (o.startsWith('http') || o.startsWith('data:'))) collected.push(o);
+                  else if (Array.isArray(o)) o.forEach(collect);
+                  else if (typeof o === 'object') Object.values(o).forEach(collect);
+                })(maybe);
+                if (collected.length >= 6) {
+                  clearLatestFaces();
+                  latestFaces = collected.slice(0,6).map(normalizeFaceUrl);
+                  applyFacesToCube(latestFaces);
+                  populateThumbs(latestFaces);
+                  status.innerHTML = `Generated 6 views for: <strong>${escapeHtml(desc)}</strong> (remote fallback)`;
+                  hideProgress(); burstConfetti(); return;
+                }
+              }
+            } catch(e) {
+              // not json — continue
+            }
+          }
+        }
+
+        throw new Error('Unsupported response format from n8n. Check that your workflow returns either JSON {faces:[...]} or multipart binary with face0..face5 parts (base64).');
+
       } catch (err) {
-        console.warn('Remote processing failed — falling back to local simulation.', err);
-        // fallback to local simulation
+        console.warn('Remote processing failed or returned unsupported format — falling back to local simulation.', err);
+        // fallback to local simulation (six generated variations)
         try {
           const ops = [
             {flip:false,rot:0,gray:false,scale:1},
@@ -233,6 +407,7 @@
             {flip:false,rot:0,gray:true,scale:0.9}
           ];
           const results = await Promise.all(ops.map(o => canvasTransform(sourceImage,o)));
+          clearLatestFaces();
           latestFaces = results;
           applyFacesToCube(results);
           populateThumbs(results);
@@ -248,8 +423,24 @@
     });
 
     // image -> cube functions
-    function applyFacesToCube(arr){ ['front','back','right','left','top','bottom'].forEach((k,i)=>{ const el=document.getElementById('f-'+k); if(el) el.src = arr[i] || '/'; }); }
-    function populateThumbs(arr){ thumbs.innerHTML = ''; arr.forEach((d,i)=>{ const im=document.createElement('img'); im.src=d; im.title=['Front','Back','Right','Left','Top','Bottom'][i]; im.addEventListener('click', ()=>{ focusFace(i); setActiveThumb(i); }); if(i===0) im.classList.add('active'); thumbs.appendChild(im); }); }
+    function applyFacesToCube(arr){
+      const keys = ['front','back','right','left','top','bottom'];
+      keys.forEach((k,i)=>{
+        const el=document.getElementById('f-'+k);
+        if(el) el.src = arr[i] || '/';
+      });
+    }
+    function populateThumbs(arr){
+      thumbs.innerHTML = '';
+      arr.forEach((d,i)=>{
+        const im=document.createElement('img');
+        im.src=d || '';
+        im.title=['Front','Back','Right','Left','Top','Bottom'][i];
+        im.addEventListener('click', ()=>{ focusFace(i); setActiveThumb(i); });
+        if(i===0) im.classList.add('active');
+        thumbs.appendChild(im);
+      });
+    }
     function setActiveThumb(i){ Array.from(thumbs.children).forEach((t,idx)=> t.classList.toggle('active', idx===i)); }
 
     // progress overlay
@@ -257,15 +448,15 @@
     function showProgress(){ if(progEl) return; progEl=document.createElement('div'); progEl.style.position='fixed'; progEl.style.left='50%'; progEl.style.top='12%'; progEl.style.transform='translateX(-50%)'; progEl.style.padding='14px 20px'; progEl.style.background='linear-gradient(135deg,rgba(255,107,157,0.9),rgba(254,202,87,0.9))'; progEl.style.border='2px solid rgba(255,255,255,0.3)'; progEl.style.borderRadius='16px'; progEl.style.color='#fff'; progEl.style.fontWeight='700'; progEl.style.boxShadow='0 8px 32px rgba(0,0,0,0.4)'; progEl.style.backdropFilter='blur(10px)'; progEl.innerText='Processing — thinking like an AI agent...'; document.body.appendChild(progEl); }
     function hideProgress(){ if(!progEl) return; progEl.remove(); progEl=null; }
 
-    // focus cube
+    // focus cube and rotation handlers
     const cube = document.getElementById('cube'); let rx=-12, ry=20;
     function focusFace(i){ if(i===0) { rx=-12; ry=20; } if(i===1) { rx=-12; ry=200; } if(i===2) { rx=-12; ry=110; } if(i===3) { rx=-12; ry=-70; } if(i===4) { rx=-100; ry=20; } if(i===5) { rx=80; ry=20; } cube.style.transform = `rotateX(${rx}deg) rotateY(${ry}deg)`; }
 
-    // canvas transform (generates variations)
+    // canvas transform (local generator)
     function canvasTransform(img, opts={}){ return new Promise((res)=>{ const size = 900; const c = document.createElement('canvas'); c.width=size; c.height=size; const ctx = c.getContext('2d'); ctx.fillStyle='#fff'; ctx.fillRect(0,0,size,size); ctx.save(); ctx.translate(size/2,size/2); if(opts.rot) ctx.rotate(opts.rot*Math.PI/180); if(opts.flip) ctx.scale(-1,1); const drawW = size * (opts.scale||1); const drawH = size * (opts.scale||1); ctx.drawImage(img, -drawW/2, -drawH/2, drawW, drawH); ctx.restore(); if(opts.gray||opts.blur){ const tmp=document.createElement('canvas'); tmp.width=size; tmp.height=size; const t=tmp.getContext('2d'); t.drawImage(c,0,0); if(opts.gray){ let id=t.getImageData(0,0,size,size); for(let i=0;i<id.data.length;i+=4){ const r=id.data[i],g=id.data[i+1],b=id.data[i+2]; const v=0.21*r+0.72*g+0.07*b; id.data[i]=id.data[i+1]=id.data[i+2]=v; } t.putImageData(id,0,0);} if(opts.blur){ t.globalAlpha=0.6; for(let i=0;i< (opts.blur||1); i++){ t.drawImage(tmp,-1,0); t.drawImage(tmp,1,0); t.drawImage(tmp,0,-1); t.drawImage(tmp,0,1);} t.globalAlpha=1;} const out=document.createElement('canvas'); out.width=360; out.height=360; out.getContext('2d').drawImage(tmp,0,0,360,360); res(out.toDataURL('image/jpeg',0.92)); } else { const out=document.createElement('canvas'); out.width=360; out.height=360; out.getContext('2d').drawImage(c,0,0,360,360); res(out.toDataURL('image/jpeg',0.92)); } }) }
 
     function loadImageFromFile(file){ return new Promise((res,rej)=>{ const img=new Image(); img.onload=()=>res(img); img.onerror=rej; img.src=URL.createObjectURL(file); }) }
-    function escapeHtml(s){ return s.replace(/[&<>\"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":"&#39;"}[c]; }); }
+    function escapeHtml(s){ return String(s||'').replace(/[&<>\"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":"&#39;"}[c]; }); }
 
     // Drag rotation
     (function(){ let dragging=false,lastX=0,lastY=0; document.getElementById('stage').addEventListener('pointerdown', e=>{ dragging=true; lastX=e.clientX; lastY=e.clientY; e.target.setPointerCapture && e.target.setPointerCapture(e.pointerId); }); window.addEventListener('pointerup', ()=>dragging=false); window.addEventListener('pointermove', e=>{ if(!dragging) return; const dx=e.clientX-lastX, dy=e.clientY-lastY; lastX=e.clientX; lastY=e.clientY; ry+=dx*0.4; rx-=dy*0.4; cube.style.transform=`rotateX(${rx}deg) rotateY(${ry}deg)`; }); })();
@@ -295,7 +486,18 @@
       latestFaces.forEach((d,i)=>{ const a=document.createElement('a'); a.href=d; a.download='face-'+i+'.jpg'; document.body.appendChild(a); a.click(); a.remove(); });
     });
 
-    function normalizeFaceUrl(face){ if(!face) return ''; return String(face); }
+    function normalizeFaceUrl(face){
+      if(!face) return '';
+      // If it's already a data: or http link, return as-is
+      const s = String(face);
+      if (s.startsWith('data:') || s.startsWith('http')) return s;
+      // If it's a Drive link, convert to embeddable uc URL
+      if (s.includes('drive.google.com')) {
+        const m = s.match(/\/d\/([a-zA-Z0-9_-]+)/) || s.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+        if (m && m[1]) return `https://drive.google.com/uc?export=view&id=${m[1]}`;
+      }
+      return s;
+    }
 
     // share copy text
     document.getElementById('shareBtn').addEventListener('click', ()=>{ const text = `Study Visualizer — generated views for: ${descEl.value||'untitled'}`; navigator.clipboard.writeText(text).then(()=>{ alert('Share text copied to clipboard'); }); });
