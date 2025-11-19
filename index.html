@@ -131,10 +131,12 @@
 
   <script>
     // ----------- Config -----------
+    // Replace this with your real webhook URL. Keep it CORS-enabled.
+    // Example: const N8N_URL = "https://your-ngrok-or-domain/webhook/your-webhook";
     const N8N_URL = "https://selectable-doomily-max.ngrok-free.dev/webhook-test/my-webhook";
-    // ------------------------------
+    // -------------------------------
 
-    // Particles background
+    // Particles background (unchanged)
     const canvas = document.getElementById('particles');
     const ctx = canvas.getContext('2d');
     let W, H, parts=[];
@@ -169,48 +171,95 @@
       playPop();
       showProgress();
 
-      // Prepare form data: send original file and description
       const fd = new FormData();
       fd.append('image', file);
       fd.append('description', desc);
 
       // Try remote n8n endpoint
       try {
-        const resp = await fetch(N8N_URL, { method: 'POST', body: fd, mode: 'cors' });
-        // Check response status
+        // 30s timeout wrapper
+        const controller = new AbortController();
+        const timeout = setTimeout(()=>controller.abort(), 30000);
+
+        const resp = await fetch(N8N_URL, { method: 'POST', body: fd, mode: 'cors', signal: controller.signal });
+        clearTimeout(timeout);
+
         if (!resp.ok) {
           const text = await resp.text().catch(()=>'<no body>');
           console.error('n8n returned error', resp.status, resp.statusText, text);
-          alert('Server error: ' + resp.status + ' — see console for details.');
-          hideProgress();
-          return;
+          throw new Error('n8n server error: ' + resp.status);
         }
 
-        // parse body safely
-        let json;
+        // try parse JSON
+        let json = null;
         const ct = resp.headers.get('content-type') || '';
         if (ct.includes('application/json')) {
           json = await resp.json();
         } else {
           const txt = await resp.text();
-          try { json = JSON.parse(txt); } catch(e) { console.error('Non-JSON response from n8n:', txt); alert('Unexpected response from server — see console.'); hideProgress(); return; }
+          try { json = JSON.parse(txt); } catch(e) {
+            console.warn('Response not JSON:', txt);
+            throw new Error('Response from server not valid JSON');
+          }
         }
 
-        if (json && Array.isArray(json.faces) && json.faces.length === 6) {
-          latestFaces = json.faces.map(f => normalizeFaceUrl(f));
+        // Accept multiple response shapes:
+        // 1) { faces: [url, ...] }     (array of 6)
+        // 2) { images: { front: url, back: url, ... } }
+        // 3) { faces: [ {url:..., name:...}, ... ] }
+        // 4) any combination where values may be data URLs or Drive links
+
+        let faces = null;
+
+        if (Array.isArray(json.faces)) {
+          // array form: extract url strings (if objects, try .url or .src)
+          faces = json.faces.map(f => (typeof f === 'string') ? f : (f && (f.url || f.src || f.data)) ? (f.url||f.src||f.data) : '');
+        } else if (json.images && typeof json.images === 'object') {
+          // map form: produce in order front, back, right, left, top, bottom
+          const keys = ['front','back','right','left','top','bottom'];
+          faces = keys.map(k => json.images[k] || json.images[k.toUpperCase()] || '');
+        } else if (json.data && Array.isArray(json.data)) {
+          faces = json.data.map(String);
+        }
+
+        // if faces is present and length 6 -> normalize and use them
+        if (faces && faces.length === 6) {
+          latestFaces = faces.map(normalizeFaceUrl);
           applyFacesToCube(latestFaces);
           populateThumbs(latestFaces);
           status.innerHTML = `Generated 6 views for: <strong>${escapeHtml(desc)}</strong> (remote)`;
           hideProgress();
           burstConfetti();
           return;
-        } else {
-          console.warn('Unexpected response from n8n (not faces array):', json);
-          throw new Error('Unexpected response from remote');
         }
+
+        // else: maybe server returned a single object with file ids or drive links
+        // fallback: collect any string values from the entire JSON until we have 6 images
+        const collected = [];
+        (function collectStrings(o) {
+          if (!o || collected.length >= 6) return;
+          if (typeof o === 'string' && o.length>5 && (o.startsWith('http') || o.startsWith('data:'))) collected.push(o);
+          else if (Array.isArray(o)) o.forEach(collectStrings);
+          else if (typeof o === 'object') Object.values(o).forEach(collectStrings);
+        })(json);
+
+        if (collected.length >= 6) {
+          latestFaces = collected.slice(0,6).map(normalizeFaceUrl);
+          applyFacesToCube(latestFaces);
+          populateThumbs(latestFaces);
+          status.innerHTML = `Generated 6 views for: <strong>${escapeHtml(desc)}</strong> (remote - auto-collected)`;
+          hideProgress();
+          burstConfetti();
+          return;
+        }
+
+        // nothing usable returned
+        console.warn('Unexpected response from n8n:', json);
+        throw new Error('Unexpected response from remote');
+
       } catch (err) {
         console.warn('Remote processing failed — falling back to local simulation.', err);
-        // fallback to local simulation
+        // fallback to local simulation (same as your original ops)
         try {
           const ops = [
             {flip:false,rot:0,gray:false,scale:1},
@@ -283,7 +332,31 @@
       latestFaces.forEach((d,i)=>{ const a=document.createElement('a'); a.href=d; a.download='face-'+i+'.jpg'; document.body.appendChild(a); a.click(); a.remove(); });
     });
 
-    function normalizeFaceUrl(face){ if(!face) return ''; return String(face); }
+    function normalizeFaceUrl(face){
+      if(!face) return '';
+      const s = String(face).trim();
+      // if google drive share link -> convert to embedable 'uc?export=view&id='
+      if (s.includes('drive.google.com')) return convertGoogleDriveLink(s);
+      // if looks like direct link or data url -> return as-is
+      if (s.startsWith('http') || s.startsWith('data:')) return s;
+      // if it's a plain file id (common if n8n returns id only) -> build drive uc url
+      if (/^[a-zA-Z0-9_-]{10,}$/.test(s)) return `https://drive.google.com/uc?export=view&id=${s}`;
+      return s;
+    }
+
+    function convertGoogleDriveLink(url){
+      // handle multiple drive link forms
+      try {
+        // common share link: https://drive.google.com/file/d/FILE_ID/view?usp=sharing
+        let m = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
+        if (m && m[1]) return `https://drive.google.com/uc?export=view&id=${m[1]}`;
+        // alternate: https://drive.google.com/open?id=FILE_ID or webContentLink with id param
+        m = url.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+        if (m && m[1]) return `https://drive.google.com/uc?export=view&id=${m[1]}`;
+        // if it's already a webContentLink with &export=download, return as-is
+        return url;
+      } catch (e) { return url; }
+    }
 
     // share copy text
     document.getElementById('shareBtn').addEventListener('click', ()=>{ const text = `Study Visualizer — generated views for: ${descEl.value||'untitled'}`; navigator.clipboard.writeText(text).then(()=>{ alert('Share text copied to clipboard'); }); });
